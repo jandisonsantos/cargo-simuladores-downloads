@@ -1,0 +1,92 @@
+name: Update Advanced Installer AIU
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Versão sem v. Ex: 2.0.79"
+        required: true
+
+jobs:
+  update-aiu:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Define release data
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+            TAG="v$VERSION"
+            RELEASE_JSON=$(gh release view "$TAG" --repo jandisonsantos/cargo-simuladores-downloads --json assets)
+          else
+            TAG="${{ github.event.release.tag_name }}"
+            VERSION="${TAG#v}"
+            RELEASE_JSON='${{ toJson(github.event.release) }}'
+          fi
+
+          FILE_NAME="cargo_simuladores_central_controles_${VERSION}.exe"
+
+          ASSET_URL=$(echo "$RELEASE_JSON" | jq -r --arg FILE "$FILE_NAME" '.assets[] | select(.name == $FILE) | .browser_download_url')
+          ASSET_SIZE=$(echo "$RELEASE_JSON" | jq -r --arg FILE "$FILE_NAME" '.assets[] | select(.name == $FILE) | .size')
+
+          if [ -z "$ASSET_URL" ] || [ "$ASSET_URL" = "null" ]; then
+            echo "Asset não encontrado: $FILE_NAME"
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "file_name=$FILE_NAME" >> $GITHUB_OUTPUT
+          echo "asset_url=$ASSET_URL" >> $GITHUB_OUTPUT
+          echo "asset_size=$ASSET_SIZE" >> $GITHUB_OUTPUT
+
+      - name: Checkout device-configs
+        uses: actions/checkout@v4
+        with:
+          repository: jandisonsantos/device-configs
+          token: ${{ secrets.DEVICE_CONFIGS_TOKEN }}
+          ref: main
+          path: device-configs
+
+      - name: Generate updates.txt
+        run: |
+          VERSION="${{ steps.release.outputs.version }}"
+          FILE_NAME="${{ steps.release.outputs.file_name }}"
+          ASSET_URL="${{ steps.release.outputs.asset_url }}"
+          ASSET_SIZE="${{ steps.release.outputs.asset_size }}"
+
+          cat > device-configs/updates.txt <<EOF
+          ;aiu;
+
+          [Update1]
+          Name=Central de controles $VERSION
+          Description=Atualizacao da Central de Controles
+          URL=$ASSET_URL
+          Size=$ASSET_SIZE
+          ServerFileName=$FILE_NAME
+          FilePath=[APPDIR]ChaveDeSetaETS2.exe
+          Version=$VERSION
+          Replaces=All
+          EOF
+
+          sed -i 's/^[ \t]*//' device-configs/updates.txt
+
+      - name: Commit updates.txt
+        run: |
+          cd device-configs
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+
+          git add updates.txt
+
+          if git diff --cached --quiet; then
+            echo "Sem alterações no updates.txt"
+            exit 0
+          fi
+
+          git commit -m "chore: update AIU to ${{ steps.release.outputs.version }}"
+          git push
