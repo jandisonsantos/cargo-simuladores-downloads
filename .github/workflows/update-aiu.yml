@@ -41,8 +41,31 @@ jobs:
 
           FILE_NAME="cargo_simuladores_central_controles_${VERSION}.exe"
 
-          ASSET_URL=$(echo "$RELEASE_JSON" | jq -r --arg FILE "$FILE_NAME" '.assets[] | select(.name == $FILE) | .browser_download_url')
-          ASSET_SIZE=$(echo "$RELEASE_JSON" | jq -r --arg FILE "$FILE_NAME" '.assets[] | select(.name == $FILE) | .size')
+          ASSET_URL=""
+          ASSET_SIZE=""
+
+          for i in {1..10}; do
+            RELEASE_JSON=$(gh release view "$TAG" \
+              --repo jandisonsantos/cargo-simuladores-downloads \
+              --json assets)
+
+            ASSET_URL=$(echo "$RELEASE_JSON" | jq -r --arg FILE "$FILE_NAME" '.assets[] | select(.name == $FILE) | .browser_download_url')
+            ASSET_SIZE=$(echo "$RELEASE_JSON" | jq -r --arg FILE "$FILE_NAME" '.assets[] | select(.name == $FILE) | .size')
+
+            if [ -n "$ASSET_URL" ] && [ "$ASSET_URL" != "null" ]; then
+              break
+            fi
+
+            echo "Asset ainda não disponível. Tentativa $i/10..."
+            sleep 10
+          done
+
+          if [ -z "$ASSET_URL" ] || [ "$ASSET_URL" = "null" ]; then
+            echo "Asset não encontrado: $FILE_NAME"
+            echo "Assets disponíveis:"
+            echo "$RELEASE_JSON" | jq -r '.assets[].name'
+            exit 1
+          fi
 
           if [ -z "$ASSET_URL" ] || [ "$ASSET_URL" = "null" ]; then
             echo "Asset não encontrado: $FILE_NAME"
