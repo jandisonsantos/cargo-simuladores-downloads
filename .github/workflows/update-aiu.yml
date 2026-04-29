@@ -22,11 +22,21 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             VERSION="${{ github.event.inputs.version }}"
             TAG="v$VERSION"
-            RELEASE_JSON=$(gh release view "$TAG" --repo jandisonsantos/cargo-simuladores-downloads --json assets)
+
+            RELEASE_JSON=$(gh release view "$TAG" \
+              --repo jandisonsantos/cargo-simuladores-downloads \
+              --json assets,body)
+
+            DESCRIPTION=$(echo "$RELEASE_JSON" | jq -r '.body // "Atualizacao da Central de Controles"')
           else
             TAG="${{ github.event.release.tag_name }}"
             VERSION="${TAG#v}"
-            RELEASE_JSON='${{ toJson(github.event.release) }}'
+
+            DESCRIPTION=$(jq -r '.release.body // "Atualizacao da Central de Controles"' "$GITHUB_EVENT_PATH")
+
+            RELEASE_JSON=$(gh release view "$TAG" \
+              --repo jandisonsantos/cargo-simuladores-downloads \
+              --json assets)
           fi
 
           FILE_NAME="cargo_simuladores_central_controles_${VERSION}.exe"
@@ -39,10 +49,14 @@ jobs:
             exit 1
           fi
 
+          # Sanitiza descrição (AIU não aceita quebra de linha nem alguns caracteres)
+          DESCRIPTION=$(echo "$DESCRIPTION" | tr '\r\n' ' ' | sed 's/[=;]/-/g' | sed 's/  */ /g' | xargs)
+
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "file_name=$FILE_NAME" >> $GITHUB_OUTPUT
           echo "asset_url=$ASSET_URL" >> $GITHUB_OUTPUT
           echo "asset_size=$ASSET_SIZE" >> $GITHUB_OUTPUT
+          echo "description=$DESCRIPTION" >> $GITHUB_OUTPUT
 
       - name: Checkout device-configs
         uses: actions/checkout@v4
@@ -58,13 +72,14 @@ jobs:
           FILE_NAME="${{ steps.release.outputs.file_name }}"
           ASSET_URL="${{ steps.release.outputs.asset_url }}"
           ASSET_SIZE="${{ steps.release.outputs.asset_size }}"
+          DESCRIPTION="${{ steps.release.outputs.description }}"
 
           cat > device-configs/updates.txt <<EOF
           ;aiu;
 
           [Update1]
           Name=Central de controles $VERSION
-          Description=Atualizacao da Central de Controles
+          Description=$DESCRIPTION
           URL=$ASSET_URL
           Size=$ASSET_SIZE
           ServerFileName=$FILE_NAME
@@ -73,11 +88,13 @@ jobs:
           Replaces=All
           EOF
 
+          # Remove indentação do YAML
           sed -i 's/^[ \t]*//' device-configs/updates.txt
 
       - name: Commit updates.txt
         run: |
           cd device-configs
+
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
 
