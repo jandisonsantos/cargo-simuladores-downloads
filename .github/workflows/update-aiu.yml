@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Versão sem v. Ex: 2.0.79"
+        description: "Versão sem v. Ex: 2.0.80"
         required: true
 
 jobs:
@@ -19,60 +19,35 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          REPO="jandisonsantos/cargo-simuladores-downloads"
+
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             VERSION="${{ github.event.inputs.version }}"
             TAG="v$VERSION"
-
-            RELEASE_JSON=$(gh release view "$TAG" \
-              --repo jandisonsantos/cargo-simuladores-downloads \
-              --json assets,body)
-
-            DESCRIPTION=$(echo "$RELEASE_JSON" | jq -r '.body // "Atualizacao da Central de Controles"')
           else
             TAG="${{ github.event.release.tag_name }}"
             VERSION="${TAG#v}"
-
-            DESCRIPTION=$(jq -r '.release.body // "Atualizacao da Central de Controles"' "$GITHUB_EVENT_PATH")
-
-            RELEASE_JSON=$(gh release view "$TAG" \
-              --repo jandisonsantos/cargo-simuladores-downloads \
-              --json assets)
           fi
 
           FILE_NAME="cargo_simuladores_central_controles_${VERSION}.exe"
 
-          ASSET_URL=""
-          ASSET_SIZE=""
+          RELEASE_JSON=$(gh release view "$TAG" --repo "$REPO" --json assets,body)
 
-          for i in {1..10}; do
-            RELEASE_JSON=$(gh release view "$TAG" \
-              --repo jandisonsantos/cargo-simuladores-downloads \
-              --json assets)
+          echo "Procurando asset: $FILE_NAME"
+          echo "Assets disponíveis:"
+          echo "$RELEASE_JSON" | jq -r '.assets[].name'
 
-            ASSET_URL=$(echo "$RELEASE_JSON" | jq -r --arg FILE "$FILE_NAME" '.assets[] | select(.name == $FILE) | .browser_download_url')
-            ASSET_SIZE=$(echo "$RELEASE_JSON" | jq -r --arg FILE "$FILE_NAME" '.assets[] | select(.name == $FILE) | .size')
-
-            if [ -n "$ASSET_URL" ] && [ "$ASSET_URL" != "null" ]; then
-              break
-            fi
-
-            echo "Asset ainda não disponível. Tentativa $i/10..."
-            sleep 10
-          done
+          ASSET_URL=$(echo "$RELEASE_JSON" | jq -r --arg FILE "$FILE_NAME" '.assets[] | select(.name == $FILE) | (.url // .browser_download_url)')
+          ASSET_SIZE=$(echo "$RELEASE_JSON" | jq -r --arg FILE "$FILE_NAME" '.assets[] | select(.name == $FILE) | .size')
 
           if [ -z "$ASSET_URL" ] || [ "$ASSET_URL" = "null" ]; then
-            echo "Asset não encontrado: $FILE_NAME"
-            echo "Assets disponíveis:"
-            echo "$RELEASE_JSON" | jq -r '.assets[].name'
+            echo "Asset encontrado pelo nome, mas URL não encontrada para: $FILE_NAME"
+            echo "JSON do asset:"
+            echo "$RELEASE_JSON" | jq -r --arg FILE "$FILE_NAME" '.assets[] | select(.name == $FILE)'
             exit 1
           fi
 
-          if [ -z "$ASSET_URL" ] || [ "$ASSET_URL" = "null" ]; then
-            echo "Asset não encontrado: $FILE_NAME"
-            exit 1
-          fi
-
-          # Sanitiza descrição (AIU não aceita quebra de linha nem alguns caracteres)
+          DESCRIPTION=$(echo "$RELEASE_JSON" | jq -r '.body // "Atualizacao da Central de Controles"')
           DESCRIPTION=$(echo "$DESCRIPTION" | tr '\r\n' ' ' | sed 's/[=;]/-/g' | sed 's/  */ /g' | xargs)
 
           echo "version=$VERSION" >> $GITHUB_OUTPUT
@@ -91,33 +66,25 @@ jobs:
 
       - name: Generate updates.txt
         run: |
-          VERSION="${{ steps.release.outputs.version }}"
-          FILE_NAME="${{ steps.release.outputs.file_name }}"
-          ASSET_URL="${{ steps.release.outputs.asset_url }}"
-          ASSET_SIZE="${{ steps.release.outputs.asset_size }}"
-          DESCRIPTION="${{ steps.release.outputs.description }}"
-
           cat > device-configs/updates.txt <<EOF
           ;aiu;
 
           [Update1]
-          Name=Central de controles $VERSION
-          Description=$DESCRIPTION
-          URL=$ASSET_URL
-          Size=$ASSET_SIZE
-          ServerFileName=$FILE_NAME
+          Name=Central de controles ${{ steps.release.outputs.version }}
+          Description=${{ steps.release.outputs.description }}
+          URL=${{ steps.release.outputs.asset_url }}
+          Size=${{ steps.release.outputs.asset_size }}
+          ServerFileName=${{ steps.release.outputs.file_name }}
           FilePath=[APPDIR]ChaveDeSetaETS2.exe
-          Version=$VERSION
+          Version=${{ steps.release.outputs.version }}
           Replaces=All
           EOF
 
-          # Remove indentação do YAML
           sed -i 's/^[ \t]*//' device-configs/updates.txt
 
       - name: Commit updates.txt
         run: |
           cd device-configs
-
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
 
