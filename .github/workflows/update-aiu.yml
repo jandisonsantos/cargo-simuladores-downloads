@@ -48,7 +48,16 @@ jobs:
           fi
 
           DESCRIPTION=$(echo "$RELEASE_JSON" | jq -r '.body // "Atualizacao da Central de Controles"')
-          DESCRIPTION=$(echo "$DESCRIPTION" | tr '\r\n' ' ' | sed 's/[=;]/-/g' | sed 's/  */ /g' | xargs)
+          DESCRIPTION=$(echo "$DESCRIPTION" \
+            | tr '\r\n' ' ' \
+            | sed 's/[=;]/-/g' \
+            | sed 's/  */ /g' \
+            | iconv -f UTF-8 -t ASCII//TRANSLIT \
+            | xargs)
+
+          if [ -z "$DESCRIPTION" ]; then
+            DESCRIPTION="Sistema de atualizacao automatica"
+          fi
 
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "file_name=$FILE_NAME" >> $GITHUB_OUTPUT
