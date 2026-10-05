@@ -20,7 +20,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           REPO="jandisonsantos/cargo-simuladores-downloads"
-
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             VERSION="${{ github.event.inputs.version }}"
             TAG="v$VERSION"
@@ -28,25 +27,19 @@ jobs:
             TAG="${{ github.event.release.tag_name }}"
             VERSION="${TAG#v}"
           fi
-
           FILE_NAME="cargo_simuladores_central_controles_${VERSION}.exe"
-
           RELEASE_JSON=$(gh release view "$TAG" --repo "$REPO" --json assets,body)
-
           echo "Procurando asset: $FILE_NAME"
           echo "Assets disponíveis:"
           echo "$RELEASE_JSON" | jq -r '.assets[].name'
-
           ASSET_URL=$(echo "$RELEASE_JSON" | jq -r --arg FILE "$FILE_NAME" '.assets[] | select(.name == $FILE) | (.url // .browser_download_url)')
           ASSET_SIZE=$(echo "$RELEASE_JSON" | jq -r --arg FILE "$FILE_NAME" '.assets[] | select(.name == $FILE) | .size')
-
           if [ -z "$ASSET_URL" ] || [ "$ASSET_URL" = "null" ]; then
             echo "Asset encontrado pelo nome, mas URL não encontrada para: $FILE_NAME"
             echo "JSON do asset:"
             echo "$RELEASE_JSON" | jq -r --arg FILE "$FILE_NAME" '.assets[] | select(.name == $FILE)'
             exit 1
           fi
-
           DESCRIPTION=$(echo "$RELEASE_JSON" | jq -r '.body // "Atualizacao da Central de Controles"')
           DESCRIPTION=$(echo "$DESCRIPTION" \
             | tr '\r\n' ' ' \
@@ -54,11 +47,9 @@ jobs:
             | sed 's/  */ /g' \
             | iconv -f UTF-8 -t ASCII//TRANSLIT \
             | xargs)
-
           if [ -z "$DESCRIPTION" ]; then
             DESCRIPTION="Sistema de atualizacao automatica"
           fi
-
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "file_name=$FILE_NAME" >> $GITHUB_OUTPUT
           echo "asset_url=$ASSET_URL" >> $GITHUB_OUTPUT
@@ -69,7 +60,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: jandisonsantos/device-configs
-          token: ${{ secrets.DEVICE_CONFIGS_TOKEN }}
+          ssh-key: ${{ secrets.DEVICE_CONFIGS_SSH_KEY }}
           ref: main
           path: device-configs
 
@@ -77,7 +68,6 @@ jobs:
         run: |
           cat > device-configs/updates.txt <<EOF
           ;aiu;
-
           [Update1]
           Name=Central de controles ${{ steps.release.outputs.version }}
           Description=${{ steps.release.outputs.description }}
@@ -88,7 +78,6 @@ jobs:
           Version=${{ steps.release.outputs.version }}
           Replaces=All
           EOF
-
           sed -i 's/^[ \t]*//' device-configs/updates.txt
 
       - name: Commit updates.txt
@@ -96,13 +85,10 @@ jobs:
           cd device-configs
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-
           git add updates.txt
-
           if git diff --cached --quiet; then
             echo "Sem alterações no updates.txt"
             exit 0
           fi
-
           git commit -m "chore: update AIU to ${{ steps.release.outputs.version }}"
           git push
